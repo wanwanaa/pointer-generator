@@ -107,19 +107,17 @@ def train(args, config, model):
 if __name__ == '__main__':
     # input
     parser = argparse.ArgumentParser()
-    parser.add_argument('--batch_size', '-b', type=int, default=64, help='batch size for train')
-    parser.add_argument('--hidden_size', '-l', type=int, default=512, help='dimension of code')
+    parser.add_argument('--batch_size', '-b', type=int, default=16, help='batch size for train')
+    parser.add_argument('--hidden_size', '-h', type=int, default=512, help='dimension of code')
     parser.add_argument('--epoch', '-e', type=int, default=20, help='number of training epochs')
-    parser.add_argument('--num_layers', '-n', type=int, default=2, help='number of gru layers')
+    parser.add_argument('--num_layers', '-n', type=int, default=1, help='number of gru layers')
     parser.add_argument('-seed', '-s', type=int, default=1234, help="Random seed")
-    parser.add_argument('--load_model', '-d', type=int, default=0, help='number of loading model')
+    parser.add_argument('--bidirectional', '-d', action='store_true', default=False, help="whether to use bi-gru")
     parser.add_argument('--pre_train', '-p', action='store_true', default=False, help="load pre-train embedding")
     parser.add_argument('--attention', '-a', action='store_true', default=False, help="whether to use attention")
     parser.add_argument('--save_model', '-m', action='store_true', default=False, help="whether to save model")
-    parser.add_argument('--point', '-g', action='store_true', default=False, help="pointer-generator")
+    parser.add_argument('--point-generator', '-g', action='store_true', default=False, help="pointer-generator")
     parser.add_argument('--coverage', '-c', action='store_true', default=False, help="whether to use coverage mechanism")
-    # parser.add_argument('--devices', '-d', type=int, default=2, help='specify a gpu')
-    # parser.add_argument('--beam_size', '-s', type=int, default=2, help='size of beam search')
     args = parser.parse_args()
 
     # config
@@ -134,18 +132,19 @@ if __name__ == '__main__':
     else:
         embeddings = None
 
-    # ###### test #######
+    # # ###### test #######
+    # args.bidirectional = True
     # args.attention = True
     # args.point = True
     # args.coverage = True
-    # ###### test #######
+    # # ###### test #######
 
     # model
     if args.attention:
         # attention model
         if torch.cuda.is_available():
             embeds = LSTM.Embeds(embeddings, config.vocab_size, config.dim).cuda()
-            encoder = LSTM.Encoder(embeds, config.dim, args.hidden_size, args.num_layers).cuda()
+            encoder = LSTM.Encoder(embeds, config.dim, args.hidden_size, args.bidirectional, args.num_layers).cuda()
             attention = LSTM.Attention(args.hidden_size, config.seq_len, args.coverage).cuda()
 
             decoder = LSTM.AttnDecoder(attention, embeds, config.vocab_size, config.dim,
@@ -159,7 +158,7 @@ if __name__ == '__main__':
                                        config.summary_len, config.bos, pointer, args.coverage).cuda()
         else:
             embeds = LSTM.Embeds(embeddings, config.vocab_size, config.dim)
-            encoder = LSTM.Encoder(embeds, config.dim, args.hidden_size, args.num_layers)
+            encoder = LSTM.Encoder(embeds, config.dim, args.hidden_size, args.bidirectional, args.num_layers)
             attention = LSTM.Attention(args.hidden_size, config.seq_len, args.coverage)
             decoder = LSTM.AttnDecoder(attention, embeds, config.vocab_size, config.dim,
                                   args.hidden_size, config.summary_len, args.num_layers)
@@ -174,12 +173,12 @@ if __name__ == '__main__':
         # seq2seq model
         if torch.cuda.is_available():
             embeds = LSTM.Embeds(embeddings, config.vocab_size, config.dim).cuda()
-            encoder = LSTM.Encoder(embeds, config.dim, args.hidden_size, args.num_layers).cuda()
+            encoder = LSTM.Encoder(embeds, config.dim, args.hidden_size, args.bidirectional, args.num_layers).cuda()
             decoder = LSTM.Decoder(embeds, config.vocab_size, config.dim, args.hidden_size, args.num_layers).cuda()
             seq2seq = LSTM.Seq2Seq(encoder, decoder, config.vocab_size, args.hidden_size, config.bos).cuda()
         else:
             embeds = LSTM.Embeds(embeddings, config.vocab_size, config.dim)
-            encoder = LSTM.Encoder(embeds, config.dim, args.hidden_size, args.num_layers)
+            encoder = LSTM.Encoder(embeds, config.dim, args.hidden_size, args.bidirectional, args.num_layers)
             decoder = LSTM.Decoder(embeds, config.vocab_size, config.dim, args.hidden_size, args.num_layers)
             seq2seq = LSTM.Seq2Seq(encoder, decoder, config.vocab_size, args.hidden_size, config.bos)
 

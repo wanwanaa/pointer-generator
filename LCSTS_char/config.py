@@ -6,7 +6,7 @@ class Config():
         self.filename_test = 'DATA/LCSTS/PART_III.txt'
 
         # glove
-        self.dim = 300
+        self.dim = 512
         self.filename_glove = 'DATA/glove.6B/glove.6B.{}d.txt'.format(self.dim)
         # self.filename_glove = 'DATA/glove/vectors.txt'
 

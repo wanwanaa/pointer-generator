@@ -5,23 +5,24 @@ import torch.nn.functional as F
 
 # encoding the sentences
 class Encoder(nn.Module):
-    def __init__(self, embeds, embedding_dim, hidden_size, num_layers):
+    def __init__(self, embeds, embedding_dim, hidden_size, bidirectional, num_layers):
         super(Encoder, self).__init__()
         self.embeds = embeds
         self.embedding_dim = embedding_dim
         self.hidden_size = hidden_size
+        self.bidirectional = bidirectional
         self.num_layers = num_layers
 
         self.encoder_gru = nn.GRU(self.embedding_dim,
                                   self.hidden_size,
                                   batch_first=True,
-                                  bidirectional=True,
+                                  bidirectional=self.bidirectional,
                                   num_layers=self.num_layers)
 
     def forward(self, x):
         """
         :param x: (batch, t_len)
-        :return: h(batch, n_layer, hidden_size)
+        :return: h(n_layer, batch, hidden_size)
                   out(batch, t_len, hidden_size) hidden state of gru
         """
         e = self.embeds(x)
@@ -30,7 +31,10 @@ class Encoder(nn.Module):
         # h (batch, n_layers*bidirection, hidden_size)
         out, h = self.encoder_gru(e)
 
-        out = out[:, :, :self.hidden_size] + out[:, :, self.hidden_size:]
+        # bidirectional
+        if self.bidirectional:
+            out = out[:, :, :self.hidden_size] + out[:, :, self.hidden_size:]
+
         h = h[:self.num_layers]
 
         # h = h[:self.num_layers] + h[self.num_layers:]
@@ -72,10 +76,10 @@ class Attention(nn.Module):
         self.is_coverage = is_coverage
 
         # attention
-        self.attn1 = nn.Linear(self.hidden_size*2, 1)
+        self.attn = nn.Linear(self.hidden_size*2, 1)
         # coverage mechanism
         if is_coverage:
-            self.attn2 = nn.Linear(self.hidden_size*2+t_len, 1)
+            self.cover = nn.Linear(self.t_len, self.hidden_size)
 
     def forward(self, hidden, encoder_out, cover_vector):
         """
@@ -93,14 +97,12 @@ class Attention(nn.Module):
         # attn_weights (batch, 1, time_step)
         # (batch. time_step, 1) -> (batch, 1, time_step)
         if self.is_coverage:
-            cover_vector = cover_vector.repeat(1, encoder_out.size(1), 1)
-            vector = torch.cat((hidden, encoder_out, cover_vector), dim=2)
-            attn_weights = self.attn2(F.tanh(vector)).squeeze(2)
-            attn_weights = F.softmax(attn_weights).unsqueeze(1)
-        else:
-            vector = torch.cat((hidden, encoder_out), dim=2)
-            attn_weights = self.attn1(F.tanh(vector)).squeeze(2)
-            attn_weights = F.softmax(attn_weights).unsqueeze(1)
+            cover_vector = self.cover(cover_vector).repeat(1, encoder_out.size(1), 1)
+            hidden = hidden + cover_vector
+
+        vector = torch.cat((hidden, encoder_out), dim=2)
+        attn_weights = self.attn(vector).squeeze(2)
+        attn_weights = F.softmax(F.relu(attn_weights)).unsqueeze(1)
 
         context = torch.bmm(attn_weights, encoder_out)  # (batch, 1, hidden_size)
         return attn_weights, context
@@ -206,8 +208,10 @@ class AttnSeq2Seq(nn.Module):
 
     # coverage loss
     def cover_loss(self, attn_weights, cover_vector):
-        loss = 2*torch.sum(torch.min(attn_weights, cover_vector))/attn_weights.size(0)
+        loss = torch.sum(torch.min(attn_weights, cover_vector))/attn_weights.size(0)
         return loss
+
+    ### def beam_sample(self): ###
 
     def forward(self, x, y):
         """
@@ -233,6 +237,7 @@ class AttnSeq2Seq(nn.Module):
             loss = None
         # decoder
         for i in range(y.size(1)):
+            h0 = h
             if self.is_coverage:
                 attn_weights, context, out, h = self.decoder(y[:, i], h, encoder_out, cover_vector)
                 gen = self.output_layer(out).squeeze()
@@ -247,7 +252,7 @@ class AttnSeq2Seq(nn.Module):
 
             if self.pointer:
                 # calculate generation probability
-                prob = self.pointer(context, h, y[:, i])
+                prob = self.pointer(context, h0, y[:, i])
                 final = self.final_distribution(attn_weights, x, gen, prob)
                 result.append(torch.log(final))
             else:
@@ -329,4 +334,4 @@ class Seq2Seq(nn.Module):
         y = self.convert(y)
         out, h = self.decoder(y, code)
         out = self.output_layer(out)
-        return out
+        return None, out

@@ -47,15 +47,20 @@ def test(config, epoch, model, args):
             h, encoder_outputs = model.encoder(x)
             out = (torch.ones(x.size(0)) * bos)
             result = []
+            if args.coverage:
+                cover_vector = torch.zeros((x.size(0), 1, config.seq_len)).type(torch.FloatTensor)
+            else:
+                cover_vector = None
             for i in range(s_len):
                 out = out.type(torch.LongTensor)
                 y = out
-                cover_vector = torch.zeros((x.size(0), 1, 114)).type(torch.FloatTensor)
-                attn_weights, context, out, h = model.decoder(out, h, encoder_outputs, cover_vector, True)
-                gen = torch.squeeze(model.output_layer(out))
-                # gen = torch.nn.functional.softmax(out, dim=1)
+                h0 = h
+                attn_weights, context, out, h = model.decoder(out, h, encoder_outputs, cover_vector)
+                gen = model.output_layer(out).squeeze()
+                if args.coverage:
+                    cover_vector = cover_vector + attn_weights
                 if args.point:
-                    prob = model.pointer(context, h, y)
+                    prob = model.pointer(context, h0, y)
                     final = model.final_distribution(attn_weights, x, gen, prob)
                 else:
                     final = torch.nn.functional.softmax(gen, dim=1)
@@ -91,7 +96,7 @@ def test(config, epoch, model, args):
     score = rouge_score(config.gold_summaries, filename_data)
 
     # write rouge
-    write_rouge(filename_rouge, score)
+    write_rouge(filename_rouge, score, epoch)
 
     # print rouge
     print('epoch:', epoch, '|ROUGE-1 f: %.4f' % score['rouge-1']['f'],
@@ -109,15 +114,21 @@ if __name__ == '__main__':
     config = Config()
     # input
     parser = argparse.ArgumentParser()
-    parser.add_argument('--batch_size', '-b', type=int, default=128, help='batch size for train')
-    parser.add_argument('--hidden_size', '-s', type=int, default=512, help='dimension of  code')
+    parser.add_argument('--batch_size', '-b', type=int, default=32, help='batch size for train')
+    parser.add_argument('--hidden_size', '-s', type=int, default=500, help='dimension of  code')
     parser.add_argument('--epoch', '-e', type=int, default=20, help='number of training epochs')
-    parser.add_argument('--num_layers', '-n', type=int, default=2, help='number of gru layers')
+    parser.add_argument('--num_layers', '-n', type=int, default=1, help='number of gru layers')
     parser.add_argument('--attention', '-a', action='store_true', default=False, help="whether to use attention")
     parser.add_argument('--pre_train', '-p', action='store_true', default=False, help="load pre-train embedding")
     parser.add_argument('--point', '-g', action='store_true', default=False, help="pointer-generator")
-    # parser.add_argument('--devices', '-d', type=int, default=2, help='specify a gpu')
+    parser.add_argument('--coverage', '-c', action='store_true', default=False, help="whether to use coverage mechanism")
     args = parser.parse_args()
+
+    # ########test######## #
+    # args.attention = True
+    # args.point = True
+    # args.coverage = True
+    # ########test######## #
 
     # embeddings
     if args.pre_train:
